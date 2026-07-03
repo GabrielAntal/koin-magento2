@@ -48,7 +48,7 @@ class QuoteSubmitSuccess implements ObserverInterface
             if ($payment->getMethodInstance()->getConfigData('auto_capture') && $apiStatus == Api::STATUS_AUTHORIZED) {
                 $this->helperOrder->captureOrder($order, Invoice::CAPTURE_ONLINE);
             } elseif ($apiStatus == Api::STATUS_COLLECTED) {
-                $this->helperOrder->captureOrder($order, Invoice::CAPTURE_OFFLINE);
+                $this->helperOrder->invoiceOrder($order, $order->getBaseGrandTotal());
             }
         } catch (\Exception $e) {
             $this->handleCaptureError($order, $payment, $e);
