@@ -38,7 +38,7 @@ class QuoteSubmitSuccess implements ObserverInterface
     {
         $payment = $order->getPayment();
 
-        if (!str_starts_with($payment->getMethod(), 'koin_')) {
+        if (!str_starts_with((string) $payment->getMethod(), 'koin_')) {
             return;
         }
 
