@@ -239,7 +239,7 @@ class PaymentsRequest
 
         $this->isTaxVatRequired($customerTaxVat);
 
-        $payerData->document = ($customerTaxVat !== null && trim($customerTaxVat) !== '') ? $this->getDocument($customerTaxVat) : '';
+        $payerData->document = ($customerTaxVat !== null && trim($customerTaxVat) !== '') ? $this->getDocument($customerTaxVat) : null;
 
         $phoneNumber = $this->helper->formatPhoneNumber($address->getTelephone() ?: '');
         $payerData->phone = new \stdClass();
@@ -271,7 +271,7 @@ class PaymentsRequest
 
         $this->isTaxVatRequired($customerTaxVat);
 
-        $buyerData->document = ($customerTaxVat !== null && trim($customerTaxVat) !== '') ? $this->getDocument($customerTaxVat) : '';
+        $buyerData->document = ($customerTaxVat !== null && trim($customerTaxVat) !== '') ? $this->getDocument($customerTaxVat) : null;
 
         $phoneNumber = $this->helper->formatPhoneNumber($address->getTelephone() ?: '');
         $buyerData->phone = new \stdClass();
