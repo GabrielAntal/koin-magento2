@@ -31,6 +31,8 @@ use Magento\Framework\Stdlib\DateTime\DateTime;
 use Magento\Payment\Gateway\ConfigInterface;
 use Magento\Sales\Api\Data\OrderItemInterface;
 use Magento\Sales\Model\Order;
+use Magento\Tax\Api\Data\AppliedTaxRateInterface;
+use Magento\Tax\Api\Data\OrderTaxDetailsAppliedTaxInterface;
 
 class PaymentsRequest
 {
@@ -183,23 +185,23 @@ class PaymentsRequest
         try {
             $appliedTaxes = $order->getExtensionAttributes()?->getAppliedTaxes() ?? [];
             $base = (float) ($order->getSubtotal() +  $order->getDiscountAmount() + $order->getShippingDiscountAmount());
-            foreach ($appliedTaxes as $tax) {
-                $rates = $tax->getExtensionAttributes()?->getRates() ?? [];
-                if (empty($rates)) {
+            foreach ($appliedTaxes as $appliedTax) {
+                $tax = $this->normalizeAppliedTax($appliedTax);
+                if (empty($tax['rates'])) {
                     $detail = new \stdClass();
-                    $detail->type = $tax->getCode() ?: '';
-                    $detail->value = (float) $tax->getAmount();
-                    $detail->percentage = (float) $tax->getPercent();
+                    $detail->type = $tax['code'];
+                    $detail->value = $tax['amount'];
+                    $detail->percentage = $tax['percent'];
                     $detail->base = $base;
                     $taxDetails[] = $detail;
                 } else {
-                    $taxPercent = (float) $tax->getPercent();
-                    foreach ($rates as $rate) {
+                    $taxPercent = $tax['percent'];
+                    foreach ($tax['rates'] as $rate) {
                         $detail = new \stdClass();
-                        $detail->type = $rate->getCode() ?: '';
-                        $ratePercent = (float) $rate->getPercent();
+                        $detail->type = $rate['code'];
+                        $ratePercent = $rate['percent'];
                         $detail->value = $taxPercent > 0
-                            ? round((float) ($tax->getAmount() * ($ratePercent / $taxPercent)), 2)
+                            ? round((float) ($tax['amount'] * ($ratePercent / $taxPercent)), 2)
                             : 0.0;
                         $detail->percentage = $ratePercent;
                         $detail->base = $base;
@@ -211,6 +213,77 @@ class PaymentsRequest
             $this->helper->log($e->getMessage());
         }
         return $taxDetails;
+    }
+
+    /**
+     * Flattens a single `applied_taxes` entry into a plain array.
+     *
+     * The extension attribute is declared as OrderTaxDetailsAppliedTaxInterface[], but it is only
+     * populated with objects when the order is loaded through the order repository. While the order
+     * is being placed it is still the one converted from the quote, and
+     * Magento\Tax\Model\Quote\ToOrderConverter fills it with plain arrays instead:
+     *
+     *     ['amount', 'base_amount', 'percent', 'id', 'extension_attributes' => ['rates' => [...]]]
+     *
+     * Calling a getter on those arrays raises \Error, which is not an \Exception and therefore
+     * escapes every catch on the way out, taking the whole checkout down with it. Magento core
+     * branches on the same ambiguity in
+     * Magento\Tax\Model\ResourceModel\Sales\Order\ConvertQuoteTaxToOrderTax.
+     *
+     * Note the array shape carries no `code` - its identifier is `id`, the tax rate key.
+     *
+     * @param array|OrderTaxDetailsAppliedTaxInterface $tax
+     * @return array{code: string, percent: float, amount: float, rates: array}
+     */
+    protected function normalizeAppliedTax($tax): array
+    {
+        if (!is_array($tax)) {
+            return [
+                'code' => (string) ($tax->getCode() ?: ''),
+                'percent' => (float) $tax->getPercent(),
+                'amount' => (float) $tax->getAmount(),
+                'rates' => $this->normalizeRates($tax->getExtensionAttributes()?->getRates() ?? []),
+            ];
+        }
+
+        $extensionAttributes = $tax['extension_attributes'] ?? null;
+        if (is_array($extensionAttributes)) {
+            $rates = $extensionAttributes['rates'] ?? [];
+        } elseif (is_object($extensionAttributes)) {
+            $rates = $extensionAttributes->getRates() ?? [];
+        } else {
+            // Not converted yet: the collector leaves the rates at the top level.
+            $rates = $tax['rates'] ?? [];
+        }
+
+        return [
+            'code' => (string) ($tax['code'] ?? $tax['id'] ?? ''),
+            'percent' => (float) ($tax['percent'] ?? 0),
+            'amount' => (float) ($tax['amount'] ?? 0),
+            'rates' => $this->normalizeRates($rates),
+        ];
+    }
+
+    /**
+     * @param array|AppliedTaxRateInterface[] $rates
+     * @return array<int, array{code: string, percent: float}>
+     */
+    protected function normalizeRates($rates): array
+    {
+        $normalized = [];
+        foreach ($rates as $rate) {
+            $normalized[] = is_array($rate)
+                ? [
+                    'code' => (string) ($rate['code'] ?? ''),
+                    'percent' => (float) ($rate['percent'] ?? 0),
+                ]
+                : [
+                    'code' => (string) ($rate->getCode() ?: ''),
+                    'percent' => (float) $rate->getPercent(),
+                ];
+        }
+
+        return $normalized;
     }
 
     /**

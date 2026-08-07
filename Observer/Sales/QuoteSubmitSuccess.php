@@ -10,6 +10,7 @@ use Koin\Payment\Helper\Order as HelperOrder;
 use Koin\Payment\Service\NotificationService;
 use Magento\Framework\Event\Observer;
 use Magento\Framework\Event\ObserverInterface;
+use Magento\Sales\Api\OrderRepositoryInterface;
 use Magento\Sales\Model\Order;
 use Magento\Sales\Model\Order\Invoice;
 
@@ -20,7 +21,8 @@ class QuoteSubmitSuccess implements ObserverInterface
         private Data $helper,
         private HelperOrder $helperOrder,
         private Antifraud $helperAntifraud,
-        private NotificationService $notificationService
+        private NotificationService $notificationService,
+        private OrderRepositoryInterface $orderRepository
     ) {
     }
 
@@ -48,7 +50,17 @@ class QuoteSubmitSuccess implements ObserverInterface
             if ($payment->getMethodInstance()->getConfigData('auto_capture') && $apiStatus == Api::STATUS_AUTHORIZED) {
                 $this->helperOrder->captureOrder($order, Invoice::CAPTURE_ONLINE);
             } elseif ($apiStatus == Api::STATUS_COLLECTED) {
-                $this->helperOrder->invoiceOrder($order, $order->getBaseGrandTotal());
+                // invoiceOrder() only registers the capture in memory, attaching the invoice as a
+                // related object. checkout_submit_all_after fires after the order was already
+                // saved, so nothing else persists it - save it here, as FetchInfoHandler does.
+                $order = $this->helperOrder->invoiceOrder($order, $order->getBaseGrandTotal());
+
+                $orderStatus = $this->helper->getConfig('paid_order_status', $payment->getMethod());
+                $order->setStatus($orderStatus);
+                $order->setState($this->helperOrder->getStatusState($orderStatus));
+
+                $this->orderRepository->save($order);
+                $this->helperOrder->savePayment($payment);
             }
         } catch (\Exception $e) {
             $this->handleCaptureError($order, $payment, $e);
